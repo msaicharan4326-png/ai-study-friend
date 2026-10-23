@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  AlarmClockCheck,
   BookOpen,
   BrainCircuit,
   Camera,
   CheckCircle2,
   ChevronRight,
   Clock3,
-  Download,
   FileText,
   GraduationCap,
   Headphones,
@@ -28,7 +26,7 @@ import {
   Video,
   Wand2,
 } from 'lucide-react';
-import { addDays, format, isToday } from 'date-fns';
+import { addDays, isToday } from 'date-fns';
 import { jsPDF } from 'jspdf';
 
 import { sampleBoardOptions, sampleGoals, sampleSubjects, recommendedTopics } from './lib/mockData';
@@ -81,21 +79,43 @@ const defaultTasks: TodoItem[] = [
   { id: 't3', title: 'Finish biology worksheet', due: addDays(new Date(), 2).toISOString(), completed: true },
 ];
 
+const initialMessages = [
+  {
+    id: 'msg-1',
+    role: 'assistant' as const,
+    content:
+      'Hi! I’m your AI Study Friend. Ask me anything from homework to revision, and I’ll explain it in a friendly, step-by-step way.',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'msg-2',
+    role: 'assistant' as const,
+    content:
+      'You can also ask for a quiz, a Telugu explanation, or a quick practice problem. Let’s learn together!',
+    createdAt: new Date().toISOString(),
+  },
+];
+
 const createAssistantReply = (question: string) => {
   const cleaned = question.trim();
   if (!cleaned) return 'Tell me what you want to learn about, and I will make it simple.';
+
   if (/photosyn|plant/i.test(cleaned)) {
     return 'Photosynthesis is the process plants use to make food using sunlight, water, and carbon dioxide. The key equation is: 6CO₂ + 6H₂O + light → C₆H₁₂O₆ + 6O₂. Try remembering that sunlight is the energy source, while chlorophyll captures it.';
   }
+
   if (/quadratic|equation|math/i.test(cleaned)) {
     return 'For a quadratic equation ax² + bx + c = 0, first compute the discriminant D = b² - 4ac. If D > 0, two real roots exist; if D = 0, one repeated root; if D < 0, there are no real roots. Then use x = (-b ± √D)/(2a).';
   }
+
   if (/telugu|తెలుగు/i.test(cleaned)) {
     return 'తెలుగు మాట్లాడినప్పుడు, సులభంగా అర్థమయ్యే ఉదాహరణలతో వివరించవచ్చు. ఉదాహరణ: “సూర్యరశ్మి, నీరు మరియు CO₂ వాడి మొక్క ఆహారం తయారు చేస్తుంది.” మీరు నా సహాయంతో ఒక ప్రశ్నను కూడా పరిష్కరించవచ్చు.';
   }
+
   if (/quiz|practice/i.test(cleaned)) {
     return 'Let’s do a quick practice round. Question: The product of 6 and 7 is? Answer: 42. Would you like a 3-question mini quiz on this topic?';
   }
+
   return `I understand you are asking about: “${cleaned}”. I’d explain it in a friendly way, break it into simple steps, and help with a practice question if needed. If you want, I can also explain this in Telugu or in exam mode.`;
 };
 
@@ -113,7 +133,7 @@ function App() {
   const [scannerSolution, setScannerSolution] = useState('');
   const [timer, setTimer] = useState({ minutes: 25, seconds: 0, running: false, mode: 'Focus' as 'Focus' | 'Break' });
   const [draftOnboarding, setDraftOnboarding] = useState<UserPreferences>(profile.preferences);
-  const [screen, setScreen] = useState<'sign-in' | 'onboarding' | 'app'>('app');
+  const [screen, setScreen] = useState<'sign-in' | 'onboarding' | 'app'>('sign-in');
 
   useEffect(() => {
     saveToStorage(storageKeys.user, profile);
@@ -142,11 +162,19 @@ function App() {
 
   useEffect(() => {
     if (!timer.running) return;
-    const interval = setInterval(() => {
+
+    const interval = window.setInterval(() => {
       setTimer((current) => {
         if (current.seconds === 0) {
           if (current.minutes === 0) {
-            return { ...current, running: false, mode: current.mode === 'Focus' ? 'Break' : 'Focus', minutes: current.mode === 'Focus' ? 5 : 25, seconds: 0 };
+            const nextMode = current.mode === 'Focus' ? 'Break' : 'Focus';
+            return {
+              ...current,
+              running: false,
+              mode: nextMode,
+              minutes: nextMode === 'Focus' ? 25 : 5,
+              seconds: 0,
+            };
           }
           return { ...current, minutes: current.minutes - 1, seconds: 59 };
         }
@@ -154,7 +182,7 @@ function App() {
       });
     }, 1000);
 
-    return () => clearInterval(interval);
+    return () => window.clearInterval(interval);
   }, [timer.running]);
 
   const totalStudyMinutes = useMemo(
@@ -164,33 +192,38 @@ function App() {
 
   const streak = useMemo(() => {
     let count = 0;
-    let dateCursor = new Date();
+    let current = new Date();
+
     while (count < 7) {
-      if (sessions.some((session) => isToday(new Date(session.completedAt)))) {
-        count += 1;
-        dateCursor = new Date(dateCursor.getTime() - 24 * 60 * 60 * 1000);
-      } else {
-        break;
-      }
+      const foundToday = sessions.some((session) => isToday(new Date(session.completedAt)));
+      if (!foundToday) break;
+      count += 1;
+      current = new Date(current.getTime() - 24 * 60 * 60 * 1000);
+      const sessionExistsForDay = sessions.some((session) => isToday(new Date(session.completedAt)));
+      if (!sessionExistsForDay) break;
     }
+
     return count;
   }, [sessions]);
 
   const handleAsk = () => {
     const trimmed = questionInput.trim();
     if (!trimmed) return;
+
     const userMessage: ChatMessage = {
       id: `m-${Date.now()}`,
       role: 'user',
       content: trimmed,
       createdAt: new Date().toISOString(),
     };
+
     const assistantMessage: ChatMessage = {
       id: `a-${Date.now()}`,
       role: 'assistant',
       content: createAssistantReply(trimmed),
       createdAt: new Date().toISOString(),
     };
+
     setMessages((prev) => [...prev, userMessage, assistantMessage]);
     setQuestionInput('');
     setActiveTab('tutor');
@@ -198,6 +231,7 @@ function App() {
 
   const handleAddNote = () => {
     if (!noteDraft.title.trim() && !noteDraft.body.trim()) return;
+
     const nextNote: NoteItem = {
       id: `note-${Date.now()}`,
       title: noteDraft.title || 'Untitled note',
@@ -205,6 +239,7 @@ function App() {
       subject: noteDraft.subject,
       updatedAt: new Date().toISOString(),
     };
+
     setNotes((prev) => [nextNote, ...prev]);
     setNoteDraft({ title: '', body: '', subject: 'Mathematics' });
   };
@@ -222,6 +257,7 @@ function App() {
       minutes: 25,
       completedAt: new Date().toISOString(),
     };
+
     setSessions((prev) => [session, ...prev]);
     setTimer({ minutes: 25, seconds: 0, running: false, mode: 'Focus' });
   };
@@ -368,6 +404,26 @@ function App() {
             <span>{totalStudyMinutes} min studied this week</span>
           </div>
         </div>
+      </div>
+
+      <div className="card panel">
+        <div className="panel-header">
+          <h3>Today’s tasks</h3>
+          <Star size={16} />
+        </div>
+        <ul className="task-list">
+          {tasks.map((task) => (
+            <li key={task.id} className={`task-item ${task.completed ? 'done' : ''}`}>
+              <button className="task-check" onClick={() => handleCompleteTask(task.id)}>
+                {task.completed ? '✓' : ''}
+              </button>
+              <div>
+                <strong>{task.title}</strong>
+                <small>{new Date(task.due).toLocaleDateString()}</small>
+              </div>
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   );
@@ -628,6 +684,7 @@ function App() {
             {sampleSubjects.map((subject) => (
               <button
                 key={subject}
+                type="button"
                 className={`chip ${draftOnboarding.subjects.includes(subject) ? 'active' : ''}`}
                 onClick={() => {
                   const exists = draftOnboarding.subjects.includes(subject);
@@ -649,6 +706,7 @@ function App() {
             {sampleGoals.map((goal) => (
               <button
                 key={goal}
+                type="button"
                 className={`chip ${draftOnboarding.goals.includes(goal) ? 'active' : ''}`}
                 onClick={() => {
                   const exists = draftOnboarding.goals.includes(goal);
@@ -714,7 +772,7 @@ function App() {
         </label>
 
         <button className="primary-button wide" onClick={() => setScreen('onboarding')}>Create account</button>
-        <button className="secondary-button wide" onClick={() => setScreen('onboarding')}>Continue as guest</button>
+        <button className="secondary-button wide" onClick={() => { setScreen('app'); setActiveTab('home'); }}>Continue as guest</button>
       </div>
     </div>
   );
@@ -754,7 +812,12 @@ function App() {
           { id: 'tools', label: 'Tools', icon: Wand2 },
           { id: 'profile', label: 'Profile', icon: GraduationCap },
         ].map(({ id, label, icon: Icon }) => (
-          <button key={id} className={activeTab === id ? 'nav-item active' : 'nav-item'} onClick={() => setActiveTab(id as typeof activeTab)}>
+          <button
+            key={id}
+            type="button"
+            className={activeTab === id ? 'nav-item active' : 'nav-item'}
+            onClick={() => setActiveTab(id as typeof activeTab)}
+          >
             <Icon size={18} />
             <span>{label}</span>
           </button>
